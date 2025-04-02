@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:latest
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: user_service
+    ports:
+      - "5435:5432"
+
+  user-service:
+    build:
+      context: .  # Path to the directory containing the Dockerfile for user-service
+      dockerfile: Dockerfile  # Specify Dockerfile if it's not named 'Dockerfile'
+    container_name: user-service
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+    ports:
+      - "8000:8000"
