@@ -31,10 +31,11 @@ cd user-service
 ### 2. Set Up Environment Variables
 Create a `.env` file in the root directory and define the following variables:
 ```ini
-DATABASE_URL=postgresql+psycopg2://postgres:admin@postgres:5433/user_service
-SECRET_KEY=8df30f00f8e237d53bcec4157c28decc4ddcd2e2d739114e570548925100d695
+DATABASE_URL=postgresql+psycopg2://username:password@postgres:5433/user_service
+SECRET_KEY= Your_JWT_secrete_key
 JWT_ALGORITHM=HS256
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=30
+JWT_REFRESH_TOKEN_EXPIRE_MINUTES=1400
 ```
 
 ### 3. Run the Service Using Docker
