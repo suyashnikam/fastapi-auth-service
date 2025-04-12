@@ -246,3 +246,32 @@ async def get_active_users(
     ]
 
     return response
+
+##validate user by id
+@auth_router.get("/validate-user/{user_id}", response_model=schemas.UserValidationOut)
+async def validate_user_by_id(
+    user_id: int,
+    Authorize: AuthJWT = Depends(),
+    db: Session = Depends(database.get_db)
+):
+    try:
+        Authorize.jwt_required()
+    except Exception:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    claims = Authorize.get_raw_jwt()
+    if claims.get("role") not in ["ADMIN", "STAFF"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {
+        "user_id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "role": user.role.value,
+        "is_active": user.is_active,
+        "is_valid": user.role.value == "DELIVERY" and user.is_active
+    }

@@ -29,3 +29,11 @@ class UserOut(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str
+
+class UserValidationOut(BaseModel):
+    user_id: int
+    username: str
+    email: str
+    role: str
+    is_active: bool
+    is_valid: bool
