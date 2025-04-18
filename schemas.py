@@ -1,20 +1,14 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from enum import Enum
-
-class UserRole(str, Enum):
-    ADMIN = "ADMIN"
-    STAFF = "STAFF"
-    DELIVERY = "DELIVERY"
-    CUSTOMER = "CUSTOMER"
+from models import UserRole
 
 class UserCreate(BaseModel):
     username: str
     email: EmailStr
     password: str
-
-class AdminUserCreate(UserCreate):
-    secret_key: str
+    role: Optional[UserRole] = UserRole.CUSTOMER
+    secret_key: Optional[str] = None
 
 class UserOut(BaseModel):
     id: int
@@ -22,6 +16,7 @@ class UserOut(BaseModel):
     email: str
     is_staff: bool
     is_active: bool
+    role: UserRole
 
     class Config:
         orm_mode = True
@@ -36,4 +31,4 @@ class UserValidationOut(BaseModel):
     email: str
     role: str
     is_active: bool
-    is_valid: bool
+    is_valid_delivery_person: bool

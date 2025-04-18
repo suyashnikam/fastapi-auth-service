@@ -5,64 +5,63 @@ from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from fastapi_jwt_auth import AuthJWT
 import models, schemas, database
-from schemas import UserRole
 
-auth_router = APIRouter(prefix="/auth", tags=["auth"])
+auth_router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-#create user(customer registration)
+###User signup
 @auth_router.post("/signup", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED)
-async def signup(user: schemas.UserCreate, db: Session = Depends(database.get_db)):
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
-    if db_user:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+async def signup(
+    user: schemas.UserCreate,
+    db: Session = Depends(database.get_db),
+    Authorize: AuthJWT = Depends(AuthJWT)
+):
+    # 🔐 Admin signup requires secret key
+    if user.role.value == "ADMIN":
+        if user.secret_key != os.getenv("ADMIN_SECRET_KEY"):
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid Admin secret key provided. Please check again!"
+            )
 
-    db_user = db.query(models.User).filter(models.User.username == user.username).first()
-    if db_user:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already registered")
+    # 🔐 Staff/Delivery user can only be created by an Admin
+    elif user.role.value in ["STAFF", "DELIVERY"]:
+        try:
+            Authorize.jwt_required()
+            claims = Authorize.get_raw_jwt()
+            if claims.get("role") != "ADMIN":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only admins can create staff/delivery users. Please provide a valid admin token."
+                )
+        except Exception:
+            raise HTTPException(
+                status_code=401,
+                detail="Authorization token is required to create staff or delivery user."
+            )
 
+    # 📧 Check if email or username already exists
+    if db.query(models.User).filter(models.User.email == user.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+    if db.query(models.User).filter(models.User.username == user.username).first():
+        raise HTTPException(status_code=400, detail="Username already registered")
+
+    # 🔐 Hash password and create new user
     hashed_password = pwd_context.hash(user.password)
-
-    db_user = models.User(
+    new_user = models.User(
         username=user.username,
         email=user.email,
         password=hashed_password,
-        role=UserRole.CUSTOMER,
-        is_staff=False,
-        is_active=True
+        role=user.role.value,
+        is_active=True,
+        is_staff=user.role in ["ADMIN", "STAFF"]
     )
-    db.add(db_user)
+    db.add(new_user)
     db.commit()
-    db.refresh(db_user)
-    return db_user
+    db.refresh(new_user)
 
-#create admin user (admin secret key is required)
-@auth_router.post("/create-admin-user", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED)
-async def create_admin(user: schemas.AdminUserCreate, db: Session = Depends(database.get_db)):
-    if user.secret_key != os.getenv("ADMIN_SECRET_KEY"):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid secret key")
-
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
-
-    if db_user:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
-
-    hashed_password = pwd_context.hash(user.password)
-
-    admin_user = models.User(
-        username=user.username,
-        email=user.email,
-        password=hashed_password,
-        role=UserRole.ADMIN,
-        is_staff=True,
-        is_active=True
-    )
-    db.add(admin_user)
-    db.commit()
-    db.refresh(admin_user)
-    return admin_user
-
+    return new_user
 
 #login to get access token and refresh token
 @auth_router.post("/login")
@@ -77,7 +76,7 @@ async def login(user: schemas.UserLogin, db: Session = Depends(database.get_db),
     # Include role and user_id in the JWT custom claims
     user_claims = {
         "username": db_user.username,
-        "role": db_user.role.value,  # Assuming db_user.role is an Enum
+        "role": db_user.role.value,
         "user_id": db_user.id
     }
 
@@ -93,7 +92,7 @@ async def login(user: schemas.UserLogin, db: Session = Depends(database.get_db),
 
     return {"access_token": access_token, "refresh_token": refresh_token}
 
-
+#refresh your access token using refresh token
 @auth_router.get('/refresh')
 async def refresh_token(Authorize: AuthJWT = Depends(), db: Session = Depends(database.get_db)):
     try:
@@ -143,76 +142,9 @@ async def validate_user(Authorize: AuthJWT = Depends()):
             detail={"is_valid": False, "message": "Invalid token"}
         )
 
-
-#create staff user( only admin access)
-@auth_router.post("/create-staff-user", response_model=schemas.UserOut)
-async def create_staff(
-    user: schemas.UserCreate,
-    db: Session = Depends(database.get_db),
-    Authorize: AuthJWT = Depends()
-):
-    Authorize.jwt_required()
-    claims = Authorize.get_raw_jwt()
-    if claims.get("role") != "ADMIN":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can create staff users")
-
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already exists")
-
-    hashed_password = pwd_context.hash(user.password)
-    new_user = models.User(
-        username=user.username,
-        email=user.email,
-        password=hashed_password,
-        role="STAFF",
-        is_active=True,
-        is_staff=True
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return new_user
-
-#create delivery type user( Only admin Access)
-@auth_router.post("/create-delivery-user", response_model=schemas.UserOut)
-async def create_delivery(
-    user: schemas.UserCreate,
-    db: Session = Depends(database.get_db),
-    Authorize: AuthJWT = Depends()
-):
-    try:
-        Authorize.jwt_required()
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Please provide a valid access token in headers"
-        )
-    claims = Authorize.get_raw_jwt()
-    if claims.get("role") != "ADMIN":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can create delivery users")
-
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email already exists")
-
-    hashed_password = pwd_context.hash(user.password)
-    new_user = models.User(
-        username=user.username,
-        email=user.email,
-        password=hashed_password,
-        role="DELIVERY",
-        is_active=True,
-        is_staff=False
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    return new_user
-
 #Get all active users (Admin access)
-@auth_router.get("/active-users")
-async def get_active_users(
+@auth_router.get("/users")
+async def get_users(
     db: Session = Depends(database.get_db),
     Authorize: AuthJWT = Depends()
 ):
@@ -240,12 +172,12 @@ async def get_active_users(
             "email": user.email,
             "is_staff": user.is_staff,
             "is_active": user.is_active,
-            "role": user.role.value  # Assuming it's an Enum
+            "role": user.role.value
         }
         for user in active_users
     ]
-
     return response
+
 
 ##validate user by id
 @auth_router.get("/validate-user/{user_id}", response_model=schemas.UserValidationOut)
@@ -273,5 +205,5 @@ async def validate_user_by_id(
         "email": user.email,
         "role": user.role.value,
         "is_active": user.is_active,
-        "is_valid": user.role.value == "DELIVERY" and user.is_active
+        "is_valid_delivery_person": user.role.value == "DELIVERY" and user.is_active
     }
